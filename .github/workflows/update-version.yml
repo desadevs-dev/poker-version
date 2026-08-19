@@ -1,0 +1,38 @@
+name: update-version
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-version
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extraer versión viva de BetPlay y commitear si cambió
+        run: |
+          set -e
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+          IDX=$(curl -s -A "$UA" -H "Accept-Language: es-CO,es;q=0.9" https://betplay.com.co/)
+          BUNDLE=$(printf '%s' "$IDX" | grep -oE 'main\.[a-f0-9]+\.js' | head -1)
+          if [ -z "$BUNDLE" ]; then echo "no se encontró bundle (posible bloqueo CF), no toco nada"; exit 0; fi
+          VER=$(curl -s -A "$UA" "https://betplay.com.co/$BUNDLE" | grep -oE '[,{]v:"[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ -z "$VER" ]; then echo "no se encontró versión, no toco nada"; exit 0; fi
+          OLD=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[0-9.]+"' version.json | grep -oE '[0-9.]+' | head -1)
+          echo "viva=$VER  guardada=$OLD  bundle=$BUNDLE"
+          if [ "$VER" = "$OLD" ]; then echo "sin cambios"; exit 0; fi
+          printf '{\n  "version": "%s",\n  "bundle": "%s",\n  "updatedAt": "%s"\n}\n' "$VER" "$BUNDLE" "$(date -u +%FT%TZ)" > version.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          git commit -m "version: $VER"
+          git push
